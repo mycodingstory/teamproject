@@ -176,9 +176,17 @@ namespace Team3
         // JSON 형태로 저장
         public void SaveSchedules(string filePath)
         {
+            // 필드(StartDateTime, Memo 등)도 JSON에 포함하도록 설정
+            JsonSerializerOptions options =
+                new JsonSerializerOptions();
+
+            options.IncludeFields = true;
+
             // schedules 리스트 → JSON 문자열 변환
             string json =
-                JsonSerializer.Serialize(schedules);
+                JsonSerializer.Serialize(
+                    schedules,
+                    options);
 
             // 파일 저장
             File.WriteAllText(filePath, json);
@@ -195,11 +203,20 @@ namespace Team3
                 return;
             }
 
+            // 필드(StartDateTime, Memo 등)도 읽도록 설정
+            JsonSerializerOptions options =
+                new JsonSerializerOptions();
+
+            options.IncludeFields = true;
+
             // 파일 내용 읽기
             string json = File.ReadAllText(filePath);
 
             // JSON → 리스트 변환
-            schedules = JsonSerializer.Deserialize<List<Schedule>>(json);
+            schedules =
+                JsonSerializer.Deserialize<List<Schedule>>(
+                    json,
+                    options);
 
             // null 방지
             if (schedules == null)
