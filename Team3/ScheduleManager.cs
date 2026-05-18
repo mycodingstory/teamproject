@@ -8,7 +8,7 @@ using System.IO;
 
 namespace Team3
 {
-    internal class SchedualManager
+    internal class ScheduleManager
     {
         // 전체 일정 저장 리스트
         private List<Schedule> schedules = new List<Schedule>();
