@@ -13,7 +13,7 @@ namespace SmartCalendar.Models
         public string Location { get; set; }         // 장소
         public string Memo { get; set; }             // 내용
 
-        public string TransportType;
+        public string TransportType { get; set; }
 
         public bool HasLocation
         {

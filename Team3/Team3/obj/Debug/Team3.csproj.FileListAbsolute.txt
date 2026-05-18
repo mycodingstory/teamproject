@@ -1,0 +1,10 @@
+C:\Users\user\Desktop\윈프 실습\Team3\bin\Debug\Team3.exe.config
+C:\Users\user\Desktop\윈프 실습\Team3\bin\Debug\Team3.exe
+C:\Users\user\Desktop\윈프 실습\Team3\bin\Debug\Team3.pdb
+C:\Users\user\Desktop\윈프 실습\Team3\obj\Debug\Team3.csproj.AssemblyReference.cache
+C:\Users\user\Desktop\윈프 실습\Team3\obj\Debug\Team3.Properties.Resources.resources
+C:\Users\user\Desktop\윈프 실습\Team3\obj\Debug\Team3.csproj.GenerateResource.cache
+C:\Users\user\Desktop\윈프 실습\Team3\obj\Debug\Team3.csproj.CoreCompileInputs.cache
+C:\Users\user\Desktop\윈프 실습\Team3\obj\Debug\Team3.exe
+C:\Users\user\Desktop\윈프 실습\Team3\obj\Debug\Team3.pdb
+C:\Users\user\Desktop\윈프 실습\Team3\obj\Debug\Team3.exe.config
