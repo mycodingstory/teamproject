@@ -132,24 +132,28 @@ namespace Team3
         }
 
 
-        // 일정 삭제
-        // 시작 시간이 같은 일정 삭제
-        public bool DeleteSchedule(DateTime startDateTime)
+        // 일정 조회
+        // 시작 시간, 종료 시간, 메모가 모두 같은 일정 찾기
+        public Schedule GetSchedule(DateTime startDateTime, DateTime endDateTime, string memo)
         {
-            // 삭제 대상 일정 찾기
-            Schedule target = schedules
+            return schedules
                 .FirstOrDefault(s =>
-                    s.StartDateTime == startDateTime);
+                    s.StartDateTime == startDateTime &&
+                    s.EndDateTime == endDateTime &&
+                    s.Memo == memo);
+        }
+        // 일정 삭제
+        // 시작 시간, 종료 시간, 메모가 모두 같은 일정 삭제
+        public bool DeleteSchedule(DateTime startDateTime, DateTime endDateTime, string memo)
+        {
+            Schedule target = GetSchedule(startDateTime, endDateTime, memo);
 
-            // 찾지 못한 경우
             if (target == null)
             {
                 return false;
             }
 
-            // 일정 삭제
             schedules.Remove(target);
-
             return true;
         }
 
