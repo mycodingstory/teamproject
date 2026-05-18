@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
+using System.Web.Script.Serialization;
 
 namespace SmartCalendar.Services
 {
@@ -9,8 +11,14 @@ namespace SmartCalendar.Services
 
     public class TravelService
     {
+        // 카카오 REST API 키
+        private readonly string _kakaoApiKey = "5503db437c0473d403f26d8d3c463797";
+
+        // ODsay API 키
+        private readonly string _odsayApiKey = "89evtuid8IhBLTusRYsDWtVF1M/gDeUOmr2xounG+Ss";
+
         // ─────────────────────────────────────────────
-        // 자동차 기준 이동시간 테이블 (단위: 분)
+        // 자동차 기준 이동시간 테이블 (API 실패시 fallback)
         // ─────────────────────────────────────────────
         private readonly Dictionary<string, Dictionary<string, int>> carTime =
             new Dictionary<string, Dictionary<string, int>>()
@@ -23,7 +31,9 @@ namespace SmartCalendar.Services
             { "이천", new Dictionary<string, int> { {"원주",50},  {"강남",70},  {"판교",50},  {"수원",60},  {"여주",20}  } },
         };
 
-        // 기차 기준 이동시간 테이블 (단위: 분)
+        // ─────────────────────────────────────────────
+        // 기차 기준 이동시간 테이블 (대중교통 API 실패시 fallback)
+        // ─────────────────────────────────────────────
         private readonly Dictionary<string, Dictionary<string, int>> trainTime =
             new Dictionary<string, Dictionary<string, int>>()
         {
@@ -35,7 +45,9 @@ namespace SmartCalendar.Services
             { "이천", new Dictionary<string, int> { {"원주",60},  {"강남",80},  {"판교",70},  {"수원",80},  {"여주",20}  } },
         };
 
-        // 버스 기준 이동시간 테이블 (단위: 분)
+        // ─────────────────────────────────────────────
+        // 버스 기준 이동시간 테이블 (대중교통 API 실패시 fallback)
+        // ─────────────────────────────────────────────
         private readonly Dictionary<string, Dictionary<string, int>> busTime =
             new Dictionary<string, Dictionary<string, int>>()
         {
@@ -48,88 +60,160 @@ namespace SmartCalendar.Services
         };
 
         // ─────────────────────────────────────────────
-        // 이동시간 조회 함수
-        // from: 출발 장소, to: 도착 장소, mode: 이동 수단
-        // 반환값: 이동시간 (분)
+        // 장소명 → 좌표 변환 (카카오 로컬 API)
         // ─────────────────────────────────────────────
-        public int GetTravelTime(string from, string to, TransportMode mode)
+        private (double lat, double lng)? GetCoordinates(string placeName)
+        {
+            try
+            {
+                using (var client = new HttpClient())
+                {
+                    string url = "https://dapi.kakao.com/v2/local/search/keyword.json?query=" + Uri.EscapeDataString(placeName);
+                    client.DefaultRequestHeaders.Add("Authorization", "KakaoAK " + _kakaoApiKey);
+                    var response = client.GetStringAsync(url).Result;
+                    var serializer = new JavaScriptSerializer();
+                    var json = serializer.Deserialize<Dictionary<string, object>>(response);
+                    var documents = json["documents"] as System.Collections.ArrayList;
+                    if (documents == null || documents.Count == 0) return null;
+                    var first = documents[0] as Dictionary<string, object>;
+                    double lng = double.Parse(first["x"].ToString());
+                    double lat = double.Parse(first["y"].ToString());
+                    return (lat, lng);
+                }
+            }
+            catch { return null; }
+        }
+
+        // ─────────────────────────────────────────────
+        // 자동차 이동시간 (카카오 모빌리티 API → 실패시 테이블 fallback)
+        // ─────────────────────────────────────────────
+        private int GetCarTravelTimeFromApi(string from, string to)
+        {
+            try
+            {
+                var origin = GetCoordinates(from);
+                var dest = GetCoordinates(to);
+                if (origin == null || dest == null)
+                    return GetTableTime(from, to, TransportMode.Car);
+
+                string url = "https://apis-navi.kakaomobility.com/v1/directions" +
+                             "?origin=" + origin.Value.lng + "," + origin.Value.lat +
+                             "&destination=" + dest.Value.lng + "," + dest.Value.lat;
+
+                using (var client = new HttpClient())
+                {
+                    client.DefaultRequestHeaders.Add("Authorization", "KakaoAK " + _kakaoApiKey);
+                    var response = client.GetStringAsync(url).Result;
+                    var serializer = new JavaScriptSerializer();
+                    var json = serializer.Deserialize<Dictionary<string, object>>(response);
+                    var routes = json["routes"] as System.Collections.ArrayList;
+                    var route = routes[0] as Dictionary<string, object>;
+                    var summary = route["summary"] as Dictionary<string, object>;
+                    int seconds = int.Parse(summary["duration"].ToString());
+                    return seconds / 60;
+                }
+            }
+            catch { return GetTableTime(from, to, TransportMode.Car); }
+        }
+
+        // ─────────────────────────────────────────────
+        // 대중교통 이동시간 (ODsay API → 실패시 테이블 fallback)
+        // ─────────────────────────────────────────────
+        private int GetPublicTravelTimeFromApi(string from, string to, TransportMode mode)
+        {
+            try
+            {
+                var origin = GetCoordinates(from);
+                var dest = GetCoordinates(to);
+                if (origin == null || dest == null)
+                    return GetTableTime(from, to, mode);
+
+                string url = "https://api.odsay.com/v1/api/searchPubTransPathT" +
+                             "?SX=" + origin.Value.lng +
+                             "&SY=" + origin.Value.lat +
+                             "&EX=" + dest.Value.lng +
+                             "&EY=" + dest.Value.lat +
+                             "&apiKey=" + Uri.EscapeDataString(_odsayApiKey);
+
+                using (var client = new HttpClient())
+                {
+                    var response = client.GetStringAsync(url).Result;
+                    var serializer = new JavaScriptSerializer();
+                    var json = serializer.Deserialize<Dictionary<string, object>>(response);
+                    var result = json["result"] as Dictionary<string, object>;
+                    var path = result["path"] as System.Collections.ArrayList;
+                    var first = path[0] as Dictionary<string, object>;
+                    var info = first["info"] as Dictionary<string, object>;
+                    int totalTime = int.Parse(info["totalTime"].ToString());
+                    return totalTime;
+                }
+            }
+            catch { return GetTableTime(from, to, mode); }
+        }
+
+        // ─────────────────────────────────────────────
+        // 테이블 기반 이동시간 조회 (API 실패시 fallback)
+        // ─────────────────────────────────────────────
+        private int GetTableTime(string from, string to, TransportMode mode)
         {
             if (from == to) return 0;
-
-            // 이동수단에 맞는 테이블 선택
             Dictionary<string, Dictionary<string, int>> table;
-            if (mode == TransportMode.Car)
-                table = carTime;
-            else if (mode == TransportMode.Train)
-                table = trainTime;
-            else
-                table = busTime;
-
+            if (mode == TransportMode.Car) table = carTime;
+            else if (mode == TransportMode.Train) table = trainTime;
+            else table = busTime;
             if (table.ContainsKey(from) && table[from].ContainsKey(to))
                 return table[from][to];
-
             return 30;
         }
 
         // ─────────────────────────────────────────────
-        // 1단계: 시간 겹침 검사 (이신범 파트 연계)
-        // 새 일정이 기존 일정과 시간이 겹치는지 확인
-        //
-        // 겹침 조건:
-        //   new.StartDateTime < old.EndDateTime
-        //   && new.EndDateTime > old.StartDateTime
-        //   → 둘 다 true면 겹침
-        //
-        // 반환값: true = 겹침 있음 / false = 겹침 없음
+        // 이동시간 조회 (외부 호출용)
+        // 자차: 카카오 API → 실패시 테이블
+        // 기차/버스: ODsay API → 실패시 테이블
+        // ─────────────────────────────────────────────
+        public int GetTravelTime(string from, string to, TransportMode mode)
+        {
+            if (from == to) return 0;
+            if (mode == TransportMode.Car)
+                return GetCarTravelTimeFromApi(from, to);
+            else if (mode == TransportMode.Train || mode == TransportMode.Bus)
+                return GetPublicTravelTimeFromApi(from, to, mode);
+            return GetTableTime(from, to, mode);
+        }
+
+        // ─────────────────────────────────────────────
+        // 시간 겹침 검사
+        // new.StartDateTime < old.EndDateTime && new.EndDateTime > old.StartDateTime
         // ─────────────────────────────────────────────
         public bool IsOverlap(Schedule newSched, List<Schedule> existing)
         {
             foreach (var old in existing)
             {
-                // 새 일정 시작이 기존 일정 종료 전이고
-                // 새 일정 종료가 기존 일정 시작 후면 → 겹침
                 if (newSched.StartDateTime < old.EndDateTime &&
                     newSched.EndDateTime > old.StartDateTime)
-                {
-                    return true; // 겹치는 일정 발견
-                }
+                    return true;
             }
-            return false; // 겹치는 일정 없음
+            return false;
         }
 
         // ─────────────────────────────────────────────
-        // 2단계: 이동시간 기반 가능 여부 판단 (네 파트 핵심)
-        // 겹침 검사 통과 후 이동시간까지 고려해서 최종 판단
-        //
-        // 판단 기준:
-        //   이전 일정 종료 + 이동시간 <= 새 일정 시작  →  앞 조건 통과
-        //   새 일정 종료 + 이동시간 <= 다음 일정 시작  →  뒤 조건 통과
-        //   둘 다 통과해야 추가 가능
+        // 일정 추가 가능 여부 판단
+        // 1단계: 시간 겹침 검사
+        // 2단계: 이전/다음 일정 이동시간 검사
+        // 장소 없는 일정은 이동 중 수행 가능 → 이동시간 검사 생략
         // ─────────────────────────────────────────────
         public bool CanInsert(Schedule newSched, List<Schedule> existing, TransportMode mode)
         {
-            // 1단계: 시간 겹침 먼저 차단
-            if (IsOverlap(newSched, existing))
-                return false;
+            if (IsOverlap(newSched, existing)) return false;
 
-            // 기존 일정을 시작 시간 기준으로 오름차순 정렬
             var sorted = existing.OrderBy(s => s.StartDateTime).ToList();
-
-            // 새 일정 시작 전에 끝나는 일정 중 가장 마지막 → 이전 일정
             var prev = sorted.LastOrDefault(s => s.EndDateTime <= newSched.StartDateTime);
-
-            // 새 일정 종료 후에 시작하는 일정 중 가장 처음 → 다음 일정
             var next = sorted.FirstOrDefault(s => s.StartDateTime >= newSched.EndDateTime);
 
             // 이전 일정 기준 검사
             if (prev != null && prev.Location != null)
             {
-                // 새 일정에 장소가 없으면 이동 중 수행 가능 → 이동시간 검사 생략
-                if (newSched.Location == null)
-                {
-                    // 통과 (이동 중 가능한 일정)
-                }
-                else
+                if (!string.IsNullOrEmpty(newSched.Location))
                 {
                     int travel = GetTravelTime(prev.Location, newSched.Location, mode);
                     if (prev.EndDateTime.AddMinutes(travel) > newSched.StartDateTime)
@@ -137,27 +221,23 @@ namespace SmartCalendar.Services
                 }
             }
 
-            // ── 다음 일정 기준 검사 ──
+            // 다음 일정 기준 검사
             if (next != null && next.Location != null)
             {
-                int travel = GetTravelTime(newSched.Location, next.Location, mode);
-
-                // 새 일정 종료 + 이동시간이 다음 일정 시작보다 늦으면 불가
-                if (newSched.EndDateTime.AddMinutes(travel) > next.StartDateTime)
-                    return false;
+                if (!string.IsNullOrEmpty(newSched.Location))
+                {
+                    int travel = GetTravelTime(newSched.Location, next.Location, mode);
+                    if (newSched.EndDateTime.AddMinutes(travel) > next.StartDateTime)
+                        return false;
+                }
             }
 
-            // 앞뒤 조건 모두 통과 → 일정 추가 가능
             return true;
         }
 
         // ─────────────────────────────────────────────
-        // 대체 시간 추천 함수
-        // 일정 추가가 불가능할 때 가장 빠른 시작 가능 시각 반환
-        //
-        // 계산 기준:
-        //   이전 일정 종료 시각 + 이동시간 = 가장 빠른 시작 가능 시각
-        // 반환값: 가능한 시작 시각 (DateTime) / 이전 일정 없으면 null
+        // 대체 시간 추천
+        // 이전 일정 종료 + 이동시간 = 가장 빠른 시작 가능 시각
         // ─────────────────────────────────────────────
         public DateTime? SuggestEarliestStart(Schedule newSched, List<Schedule> existing, TransportMode mode)
         {
@@ -168,11 +248,9 @@ namespace SmartCalendar.Services
 
             if (prev != null && prev.Location != null)
             {
-                // 이전 일정 종료 + 이동시간 = 가장 빠른 출발 가능 시각
                 int travel = GetTravelTime(prev.Location, newSched.Location, mode);
                 return prev.EndDateTime.AddMinutes(travel);
             }
-
             return null;
         }
     }
