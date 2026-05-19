@@ -1,11 +1,10 @@
-﻿using SmartCalendar.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
-using System.Web.Script.Serialization;
+using Newtonsoft.Json;
 
-namespace SmartCalendar.Services
+namespace Team3
 {
     public enum TransportMode { Car, Train, Bus }
 
@@ -71,11 +70,11 @@ namespace SmartCalendar.Services
                     string url = "https://dapi.kakao.com/v2/local/search/keyword.json?query=" + Uri.EscapeDataString(placeName);
                     client.DefaultRequestHeaders.Add("Authorization", "KakaoAK " + _kakaoApiKey);
                     var response = client.GetStringAsync(url).Result;
-                    var serializer = new JavaScriptSerializer();
-                    var json = serializer.Deserialize<Dictionary<string, object>>(response);
-                    var documents = json["documents"] as System.Collections.ArrayList;
+                    var json = JsonConvert.DeserializeObject<Dictionary<string, object>>(response);
+                    var documentsRaw = json["documents"].ToString();
+                    var documents = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(documentsRaw);
                     if (documents == null || documents.Count == 0) return null;
-                    var first = documents[0] as Dictionary<string, object>;
+                    var first = documents[0];
                     double lng = double.Parse(first["x"].ToString());
                     double lat = double.Parse(first["y"].ToString());
                     return (lat, lng);
@@ -104,11 +103,10 @@ namespace SmartCalendar.Services
                 {
                     client.DefaultRequestHeaders.Add("Authorization", "KakaoAK " + _kakaoApiKey);
                     var response = client.GetStringAsync(url).Result;
-                    var serializer = new JavaScriptSerializer();
-                    var json = serializer.Deserialize<Dictionary<string, object>>(response);
-                    var routes = json["routes"] as System.Collections.ArrayList;
-                    var route = routes[0] as Dictionary<string, object>;
-                    var summary = route["summary"] as Dictionary<string, object>;
+                    var json = JsonConvert.DeserializeObject<Dictionary<string, object>>(response);
+                    var routesRaw = json["routes"].ToString();
+                    var routes = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(routesRaw);
+                    var summary = JsonConvert.DeserializeObject<Dictionary<string, object>>(routes[0]["summary"].ToString());
                     int seconds = int.Parse(summary["duration"].ToString());
                     return seconds / 60;
                 }
@@ -138,12 +136,10 @@ namespace SmartCalendar.Services
                 using (var client = new HttpClient())
                 {
                     var response = client.GetStringAsync(url).Result;
-                    var serializer = new JavaScriptSerializer();
-                    var json = serializer.Deserialize<Dictionary<string, object>>(response);
-                    var result = json["result"] as Dictionary<string, object>;
-                    var path = result["path"] as System.Collections.ArrayList;
-                    var first = path[0] as Dictionary<string, object>;
-                    var info = first["info"] as Dictionary<string, object>;
+                    var json = JsonConvert.DeserializeObject<Dictionary<string, object>>(response);
+                    var result = JsonConvert.DeserializeObject<Dictionary<string, object>>(json["result"].ToString());
+                    var path = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(result["path"].ToString());
+                    var info = JsonConvert.DeserializeObject<Dictionary<string, object>>(path[0]["info"].ToString());
                     int totalTime = int.Parse(info["totalTime"].ToString());
                     return totalTime;
                 }
@@ -153,9 +149,14 @@ namespace SmartCalendar.Services
 
         // ─────────────────────────────────────────────
         // 테이블 기반 이동시간 조회 (API 실패시 fallback)
+        // "강남역" → "강남" 처럼 접미사 제거 후 조회
         // ─────────────────────────────────────────────
         private int GetTableTime(string from, string to, TransportMode mode)
         {
+            // "역", "시", "구" 등 접미사 제거
+            from = from.Replace("역", "").Replace("시", "").Replace("구", "").Trim();
+            to = to.Replace("역", "").Replace("시", "").Replace("구", "").Trim();
+
             if (from == to) return 0;
             Dictionary<string, Dictionary<string, int>> table;
             if (mode == TransportMode.Car) table = carTime;
@@ -168,8 +169,6 @@ namespace SmartCalendar.Services
 
         // ─────────────────────────────────────────────
         // 이동시간 조회 (외부 호출용)
-        // 자차: 카카오 API → 실패시 테이블
-        // 기차/버스: ODsay API → 실패시 테이블
         // ─────────────────────────────────────────────
         public int GetTravelTime(string from, string to, TransportMode mode)
         {
@@ -183,7 +182,6 @@ namespace SmartCalendar.Services
 
         // ─────────────────────────────────────────────
         // 시간 겹침 검사
-        // new.StartDateTime < old.EndDateTime && new.EndDateTime > old.StartDateTime
         // ─────────────────────────────────────────────
         public bool IsOverlap(Schedule newSched, List<Schedule> existing)
         {
@@ -198,9 +196,6 @@ namespace SmartCalendar.Services
 
         // ─────────────────────────────────────────────
         // 일정 추가 가능 여부 판단
-        // 1단계: 시간 겹침 검사
-        // 2단계: 이전/다음 일정 이동시간 검사
-        // 장소 없는 일정은 이동 중 수행 가능 → 이동시간 검사 생략
         // ─────────────────────────────────────────────
         public bool CanInsert(Schedule newSched, List<Schedule> existing, TransportMode mode)
         {
@@ -211,7 +206,7 @@ namespace SmartCalendar.Services
             var next = sorted.FirstOrDefault(s => s.StartDateTime >= newSched.EndDateTime);
 
             // 이전 일정 기준 검사
-            if (prev != null && prev.Location != null)
+            if (prev != null && !string.IsNullOrEmpty(prev.Location))
             {
                 if (!string.IsNullOrEmpty(newSched.Location))
                 {
@@ -222,7 +217,7 @@ namespace SmartCalendar.Services
             }
 
             // 다음 일정 기준 검사
-            if (next != null && next.Location != null)
+            if (next != null && !string.IsNullOrEmpty(next.Location))
             {
                 if (!string.IsNullOrEmpty(newSched.Location))
                 {
@@ -237,7 +232,6 @@ namespace SmartCalendar.Services
 
         // ─────────────────────────────────────────────
         // 대체 시간 추천
-        // 이전 일정 종료 + 이동시간 = 가장 빠른 시작 가능 시각
         // ─────────────────────────────────────────────
         public DateTime? SuggestEarliestStart(Schedule newSched, List<Schedule> existing, TransportMode mode)
         {
@@ -246,7 +240,7 @@ namespace SmartCalendar.Services
                 .OrderBy(s => s.EndDateTime)
                 .LastOrDefault();
 
-            if (prev != null && prev.Location != null)
+            if (prev != null && !string.IsNullOrEmpty(prev.Location))
             {
                 int travel = GetTravelTime(prev.Location, newSched.Location, mode);
                 return prev.EndDateTime.AddMinutes(travel);
