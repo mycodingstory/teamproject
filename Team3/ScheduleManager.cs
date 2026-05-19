@@ -132,6 +132,7 @@ namespace Team3
         }
 
 
+
         // 일정 조회
         // 시작 시간, 종료 시간, 메모가 모두 같은 일정 찾기
         public Schedule GetSchedule(DateTime startDateTime, DateTime endDateTime, string memo)
@@ -157,7 +158,6 @@ namespace Team3
             return true;
         }
 
-
         // 강제 일정 추가
         // 장소 없는 일정 겹침 시 사용자 허용용
         public void ForceAddSchedule(Schedule newSchedule)
@@ -176,17 +176,9 @@ namespace Team3
         // JSON 형태로 저장
         public void SaveSchedules(string filePath)
         {
-            // 필드(StartDateTime, Memo 등)도 JSON에 포함하도록 설정
-            JsonSerializerOptions options =
-                new JsonSerializerOptions();
-
-            options.IncludeFields = true;
-
             // schedules 리스트 → JSON 문자열 변환
             string json =
-                JsonSerializer.Serialize(
-                    schedules,
-                    options);
+                JsonSerializer.Serialize(schedules);
 
             // 파일 저장
             File.WriteAllText(filePath, json);
@@ -203,20 +195,12 @@ namespace Team3
                 return;
             }
 
-            // 필드(StartDateTime, Memo 등)도 읽도록 설정
-            JsonSerializerOptions options =
-                new JsonSerializerOptions();
-
-            options.IncludeFields = true;
-
             // 파일 내용 읽기
             string json = File.ReadAllText(filePath);
 
             // JSON → 리스트 변환
             schedules =
-                JsonSerializer.Deserialize<List<Schedule>>(
-                    json,
-                    options);
+                JsonSerializer.Deserialize<List<Schedule>>(json);
 
             // null 방지
             if (schedules == null)
