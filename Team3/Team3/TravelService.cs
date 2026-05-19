@@ -1,11 +1,10 @@
-﻿using SmartCalendar.Models;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 
-namespace SmartCalendar.Services
+namespace Team3
 {
     public enum TransportMode { Car, Train, Bus }
 
@@ -71,13 +70,12 @@ namespace SmartCalendar.Services
                     string url = "https://dapi.kakao.com/v2/local/search/keyword.json?query=" + Uri.EscapeDataString(placeName);
                     client.DefaultRequestHeaders.Add("Authorization", "KakaoAK " + _kakaoApiKey);
                     var response = client.GetStringAsync(url).Result;
-                    var serializer = new JavaScriptSerializer();
-                    var json = serializer.Deserialize<Dictionary<string, object>>(response);
-                    var documents = json["documents"] as System.Collections.ArrayList;
-                    if (documents == null || documents.Count == 0) return null;
-                    var first = documents[0] as Dictionary<string, object>;
-                    double lng = double.Parse(first["x"].ToString());
-                    double lat = double.Parse(first["y"].ToString());
+                    var json = JsonDocument.Parse(response);
+                    var documents = json.RootElement.GetProperty("documents");
+                    if (documents.GetArrayLength() == 0) return null;
+                    var first = documents[0];
+                    double lng = double.Parse(first.GetProperty("x").GetString());
+                    double lat = double.Parse(first.GetProperty("y").GetString());
                     return (lat, lng);
                 }
             }
@@ -104,12 +102,10 @@ namespace SmartCalendar.Services
                 {
                     client.DefaultRequestHeaders.Add("Authorization", "KakaoAK " + _kakaoApiKey);
                     var response = client.GetStringAsync(url).Result;
-                    var serializer = new JavaScriptSerializer();
-                    var json = serializer.Deserialize<Dictionary<string, object>>(response);
-                    var routes = json["routes"] as System.Collections.ArrayList;
-                    var route = routes[0] as Dictionary<string, object>;
-                    var summary = route["summary"] as Dictionary<string, object>;
-                    int seconds = int.Parse(summary["duration"].ToString());
+                    var json = JsonDocument.Parse(response);
+                    var routes = json.RootElement.GetProperty("routes");
+                    var summary = routes[0].GetProperty("summary");
+                    int seconds = summary.GetProperty("duration").GetInt32();
                     return seconds / 60;
                 }
             }
@@ -138,13 +134,9 @@ namespace SmartCalendar.Services
                 using (var client = new HttpClient())
                 {
                     var response = client.GetStringAsync(url).Result;
-                    var serializer = new JavaScriptSerializer();
-                    var json = serializer.Deserialize<Dictionary<string, object>>(response);
-                    var result = json["result"] as Dictionary<string, object>;
-                    var path = result["path"] as System.Collections.ArrayList;
-                    var first = path[0] as Dictionary<string, object>;
-                    var info = first["info"] as Dictionary<string, object>;
-                    int totalTime = int.Parse(info["totalTime"].ToString());
+                    var json = JsonDocument.Parse(response);
+                    var path = json.RootElement.GetProperty("result").GetProperty("path");
+                    int totalTime = path[0].GetProperty("info").GetProperty("totalTime").GetInt32();
                     return totalTime;
                 }
             }
