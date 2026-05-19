@@ -32,15 +32,15 @@ namespace Team3
             // 새 일정 기준 다음 일정 찾기
             Schedule next = GetNextSchedule(newSchedule);
 
-            // 여기서 4번 이동시간 담당 코드 연결 예정
-            // 예시:
-            // bool canMove = MoveService.CheckMove(prev, newSchedule, next);
+            // 이동시간 담당 코드 연결
+            var travelService = new TravelService();
+            bool canMove = travelService.CanInsert(newSchedule, schedules, mode);
 
             // 이동 불가능 시 일정 추가 실패
-            // if (!canMove)
-            // {
-            //     return false;
-            // }
+             if (!canMove)
+             {
+                return false;
+             }
 
             // 일정 추가
             schedules.Add(newSchedule);
