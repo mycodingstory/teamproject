@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace team3
+namespace Team3
 {
     public class Schedule
     {
