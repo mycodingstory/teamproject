@@ -1,24 +1,18 @@
-﻿using System;
+using Newtonsoft.Json.Linq;
+using SmartCalendar.Models;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
-using System.Text.Json;
+using System.Xml.Linq;
 
 namespace Team3
 {
-    public enum TransportMode { Car, Train, Bus }
-
     public class TravelService
     {
-        // 카카오 REST API 키
         private readonly string _kakaoApiKey = "5503db437c0473d403f26d8d3c463797";
-
-        // ODsay API 키
         private readonly string _odsayApiKey = "89evtuid8IhBLTusRYsDWtVF1M/gDeUOmr2xounG+Ss";
 
-        // ─────────────────────────────────────────────
-        // 자동차 기준 이동시간 테이블 (API 실패시 fallback)
-        // ─────────────────────────────────────────────
         private readonly Dictionary<string, Dictionary<string, int>> carTime =
             new Dictionary<string, Dictionary<string, int>>()
         {
@@ -27,40 +21,21 @@ namespace Team3
             { "판교", new Dictionary<string, int> { {"원주",90},  {"강남",25},  {"수원",30},  {"여주",60},  {"이천",50}  } },
             { "수원", new Dictionary<string, int> { {"원주",110}, {"강남",50},  {"판교",30},  {"여주",70},  {"이천",60}  } },
             { "여주", new Dictionary<string, int> { {"원주",30},  {"강남",80},  {"판교",60},  {"수원",70},  {"이천",20}  } },
-            { "이천", new Dictionary<string, int> { {"원주",50},  {"강남",70},  {"판교",50},  {"수원",60},  {"여주",20}  } },
+            { "이천", new Dictionary<string, int> {    {"원주",50},  {"강남",70},  {"판교",50},  {"수원",60},  {"여주",20}  } },
         };
 
-        // ─────────────────────────────────────────────
-        // 기차 기준 이동시간 테이블 (대중교통 API 실패시 fallback)
-        // ─────────────────────────────────────────────
-        private readonly Dictionary<string, Dictionary<string, int>> trainTime =
+        private readonly Dictionary<string, Dictionary<string, int>> publicTime =
             new Dictionary<string, Dictionary<string, int>>()
         {
-            { "원주", new Dictionary<string, int> { {"강남",70},  {"판교",80},  {"수원",90},  {"여주",40},  {"이천",60}  } },
-            { "강남", new Dictionary<string, int> { {"원주",70},  {"판교",30},  {"수원",50},  {"여주",80},  {"이천",80}  } },
-            { "판교", new Dictionary<string, int> { {"원주",80},  {"강남",30},  {"수원",40},  {"여주",70},  {"이천",70}  } },
-            { "수원", new Dictionary<string, int> { {"원주",90},  {"강남",50},  {"판교",40},  {"여주",90},  {"이천",80}  } },
-            { "여주", new Dictionary<string, int> { {"원주",40},  {"강남",80},  {"판교",70},  {"수원",90},  {"이천",20}  } },
-            { "이천", new Dictionary<string, int> { {"원주",60},  {"강남",80},  {"판교",70},  {"수원",80},  {"여주",20}  } },
+            { "원주", new Dictionary<string, int> { {"강남",90},  {"판교",100}, {"수원",120}, {"여주",40},  {"이천",70}  } },
+            { "강남", new Dictionary<string, int> { {"원주",90},  {"판교",30},  {"수원",60},  {"여주",90},  {"이천",90}  } },
+            { "판교", new Dictionary<string, int> { {"원주",100}, {"강남",30},  {"수원",50},  {"여주",80},  {"이천",80}  } },
+            { "수원", new Dictionary<string, int> { {"원주",120}, {"강남",60},  {"판교",50},  {"여주",100}, {"이천",90}  } },
+            { "여주", new Dictionary<string, int> { {"원주",40},  {"강남",90},  {"판교",80},  {"수원",100}, {"이천",20}  } },
+            { "이천", new Dictionary<string, int> { {"원주",70},  {"강남",90},  {"판교",80},  {"수원",90},  {"여주",20}  } },
         };
 
-        // ─────────────────────────────────────────────
-        // 버스 기준 이동시간 테이블 (대중교통 API 실패시 fallback)
-        // ─────────────────────────────────────────────
-        private readonly Dictionary<string, Dictionary<string, int>> busTime =
-            new Dictionary<string, Dictionary<string, int>>()
-        {
-            { "원주", new Dictionary<string, int> { {"강남",100}, {"판교",110}, {"수원",130}, {"여주",40},  {"이천",75}  } },
-            { "강남", new Dictionary<string, int> { {"원주",100}, {"판교",35},  {"수원",65},  {"여주",95},  {"이천",95}  } },
-            { "판교", new Dictionary<string, int> { {"원주",110}, {"강남",35},  {"수원",55},  {"여주",85},  {"이천",85}  } },
-            { "수원", new Dictionary<string, int> { {"원주",130}, {"강남",65},  {"판교",55},  {"여주",105}, {"이천",95}  } },
-            { "여주", new Dictionary<string, int> { {"원주",40},  {"강남",95},  {"판교",85},  {"수원",105}, {"이천",25}  } },
-            { "이천", new Dictionary<string, int> { {"원주",75},  {"강남",95},  {"판교",85},  {"수원",95},  {"여주",25}  } },
-        };
-
-        // ─────────────────────────────────────────────
         // 장소명 → 좌표 변환 (카카오 로컬 API)
-        // ─────────────────────────────────────────────
         private (double lat, double lng)? GetCoordinates(string placeName)
         {
             try
@@ -70,21 +45,18 @@ namespace Team3
                     string url = "https://dapi.kakao.com/v2/local/search/keyword.json?query=" + Uri.EscapeDataString(placeName);
                     client.DefaultRequestHeaders.Add("Authorization", "KakaoAK " + _kakaoApiKey);
                     var response = client.GetStringAsync(url).Result;
-                    var json = JsonDocument.Parse(response);
-                    var documents = json.RootElement.GetProperty("documents");
-                    if (documents.GetArrayLength() == 0) return null;
-                    var first = documents[0];
-                    double lng = double.Parse(first.GetProperty("x").GetString());
-                    double lat = double.Parse(first.GetProperty("y").GetString());
+                    var json = JObject.Parse(response);
+                    var documents = json["documents"] as Newtonsoft.Json.Linq.JArray;
+                    if (documents == null || documents.Count == 0) return null;
+                    double lng = (double)documents[0]["x"];
+                    double lat = double.Parse(documents[0]["y"].ToString());
                     return (lat, lng);
                 }
             }
             catch { return null; }
         }
 
-        // ─────────────────────────────────────────────
         // 자동차 이동시간 (카카오 모빌리티 API → 실패시 테이블 fallback)
-        // ─────────────────────────────────────────────
         private int GetCarTravelTimeFromApi(string from, string to)
         {
             try
@@ -92,7 +64,7 @@ namespace Team3
                 var origin = GetCoordinates(from);
                 var dest = GetCoordinates(to);
                 if (origin == null || dest == null)
-                    return GetTableTime(from, to, TransportMode.Car);
+                    return GetTableTime(from, to, false);
 
                 string url = "https://apis-navi.kakaomobility.com/v1/directions" +
                              "?origin=" + origin.Value.lng + "," + origin.Value.lat +
@@ -102,27 +74,23 @@ namespace Team3
                 {
                     client.DefaultRequestHeaders.Add("Authorization", "KakaoAK " + _kakaoApiKey);
                     var response = client.GetStringAsync(url).Result;
-                    var json = JsonDocument.Parse(response);
-                    var routes = json.RootElement.GetProperty("routes");
-                    var summary = routes[0].GetProperty("summary");
-                    int seconds = summary.GetProperty("duration").GetInt32();
+                    var json = JObject.Parse(response);
+                    int seconds = (int)json["routes"][0]["summary"]["duration"];
                     return seconds / 60;
                 }
             }
-            catch { return GetTableTime(from, to, TransportMode.Car); }
+            catch { return GetTableTime(from, to, false); }
         }
 
-        // ─────────────────────────────────────────────
         // 대중교통 이동시간 (ODsay API → 실패시 테이블 fallback)
-        // ─────────────────────────────────────────────
-        private int GetPublicTravelTimeFromApi(string from, string to, TransportMode mode)
+        private int GetPublicTravelTimeFromApi(string from, string to)
         {
             try
             {
                 var origin = GetCoordinates(from);
                 var dest = GetCoordinates(to);
                 if (origin == null || dest == null)
-                    return GetTableTime(from, to, mode);
+                    return GetTableTime(from, to, true);
 
                 string url = "https://api.odsay.com/v1/api/searchPubTransPathT" +
                              "?SX=" + origin.Value.lng +
@@ -134,49 +102,54 @@ namespace Team3
                 using (var client = new HttpClient())
                 {
                     var response = client.GetStringAsync(url).Result;
-                    var json = JsonDocument.Parse(response);
-                    var path = json.RootElement.GetProperty("result").GetProperty("path");
-                    int totalTime = path[0].GetProperty("info").GetProperty("totalTime").GetInt32();
-                    return totalTime;
+                    var json = JObject.Parse(response);
+                    if (json["result"] != null && json["result"]["path"] != null && json["result"]["path"].HasValues)
+                    {
+                        int totalTime = (int)json["result"]["path"][0]["info"]["totalTime"];
+                        if (totalTime > 0) return totalTime;
+                    }
+                    return GetTableTime(from, to, true);
                 }
             }
-            catch { return GetTableTime(from, to, mode); }
+            catch { return GetTableTime(from, to, true); }
         }
 
-        // ─────────────────────────────────────────────
-        // 테이블 기반 이동시간 조회 (API 실패시 fallback)
-        // ─────────────────────────────────────────────
-        private int GetTableTime(string from, string to, TransportMode mode)
+        // 테이블 기반 이동시간 조회
+        // isPublic: true → 대중교통 테이블, false → 자차 테이블
+        private int GetTableTime(string from, string to, bool isPublic)
         {
             if (from == to) return 0;
-            Dictionary<string, Dictionary<string, int>> table;
-            if (mode == TransportMode.Car) table = carTime;
-            else if (mode == TransportMode.Train) table = trainTime;
-            else table = busTime;
-            if (table.ContainsKey(from) && table[from].ContainsKey(to))
-                return table[from][to];
-            return 30;
+
+            string cleanFrom = from;
+            string cleanTo = to;
+            string[] registeredKeys = { "원주", "강남", "판교", "수원", "여주", "이천" };
+            foreach (var key in registeredKeys)
+            {
+                if (from.Contains(key)) cleanFrom = key;
+                if (to.Contains(key)) cleanTo = key;
+            }
+
+            var table = isPublic ? publicTime : carTime;
+
+            if (table.ContainsKey(cleanFrom) && table[cleanFrom].ContainsKey(cleanTo))
+                return table[cleanFrom][cleanTo];
+
+            return isPublic ? 120 : 60;
         }
 
-        // ─────────────────────────────────────────────
         // 이동시간 조회 (외부 호출용)
-        // 자차: 카카오 API → 실패시 테이블
-        // 기차/버스: ODsay API → 실패시 테이블
-        // ─────────────────────────────────────────────
-        public int GetTravelTime(string from, string to, TransportMode mode)
+        // isPublic: true → 대중교통(ODsay), false → 자차(카카오)
+        public int GetTravelTime(string from, string to, bool isPublic)
         {
+            if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to))
+                return isPublic ? 120 : 60;
             if (from == to) return 0;
-            if (mode == TransportMode.Car)
+            if (!isPublic)
                 return GetCarTravelTimeFromApi(from, to);
-            else if (mode == TransportMode.Train || mode == TransportMode.Bus)
-                return GetPublicTravelTimeFromApi(from, to, mode);
-            return GetTableTime(from, to, mode);
+            return GetPublicTravelTimeFromApi(from, to);
         }
 
-        // ─────────────────────────────────────────────
         // 시간 겹침 검사
-        // new.StartDateTime < old.EndDateTime && new.EndDateTime > old.StartDateTime
-        // ─────────────────────────────────────────────
         public bool IsOverlap(Schedule newSched, List<Schedule> existing)
         {
             foreach (var old in existing)
@@ -188,13 +161,9 @@ namespace Team3
             return false;
         }
 
-        // ─────────────────────────────────────────────
         // 일정 추가 가능 여부 판단
-        // 1단계: 시간 겹침 검사
-        // 2단계: 이전/다음 일정 이동시간 검사
-        // 장소 없는 일정은 이동 중 수행 가능 → 이동시간 검사 생략
-        // ─────────────────────────────────────────────
-        public bool CanInsert(Schedule newSched, List<Schedule> existing, TransportMode mode)
+        // isPublic: true → 대중교통, false → 자차
+        public bool CanInsert(Schedule newSched, List<Schedule> existing, bool isPublic)
         {
             if (IsOverlap(newSched, existing)) return false;
 
@@ -202,23 +171,21 @@ namespace Team3
             var prev = sorted.LastOrDefault(s => s.EndDateTime <= newSched.StartDateTime);
             var next = sorted.FirstOrDefault(s => s.StartDateTime >= newSched.EndDateTime);
 
-            // 이전 일정 기준 검사
-            if (prev != null && prev.Location != null)
+            if (prev != null && !string.IsNullOrWhiteSpace(prev.Location))
             {
                 if (!string.IsNullOrEmpty(newSched.Location))
                 {
-                    int travel = GetTravelTime(prev.Location, newSched.Location, mode);
+                    int travel = GetTravelTime(prev.Location, newSched.Location, isPublic);
                     if (prev.EndDateTime.AddMinutes(travel) > newSched.StartDateTime)
                         return false;
                 }
             }
 
-            // 다음 일정 기준 검사
-            if (next != null && next.Location != null)
+            if (next != null && !string.IsNullOrWhiteSpace(next.Location))
             {
                 if (!string.IsNullOrEmpty(newSched.Location))
                 {
-                    int travel = GetTravelTime(newSched.Location, next.Location, mode);
+                    int travel = GetTravelTime(newSched.Location, next.Location, isPublic);
                     if (newSched.EndDateTime.AddMinutes(travel) > next.StartDateTime)
                         return false;
                 }
@@ -227,20 +194,17 @@ namespace Team3
             return true;
         }
 
-        // ─────────────────────────────────────────────
         // 대체 시간 추천
-        // 이전 일정 종료 + 이동시간 = 가장 빠른 시작 가능 시각
-        // ─────────────────────────────────────────────
-        public DateTime? SuggestEarliestStart(Schedule newSched, List<Schedule> existing, TransportMode mode)
+        public DateTime? SuggestEarliestStart(Schedule newSched, List<Schedule> existing, bool isPublic)
         {
             var prev = existing
                 .Where(s => s.EndDateTime <= newSched.StartDateTime)
                 .OrderBy(s => s.EndDateTime)
                 .LastOrDefault();
 
-            if (prev != null && prev.Location != null)
+            if (prev != null && !string.IsNullOrWhiteSpace(prev.Location))
             {
-                int travel = GetTravelTime(prev.Location, newSched.Location, mode);
+                int travel = GetTravelTime(prev.Location, newSched.Location, isPublic);
                 return prev.EndDateTime.AddMinutes(travel);
             }
             return null;
