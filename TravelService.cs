@@ -1,41 +1,40 @@
-using Newtonsoft.Json.Linq;
-using SmartCalendar.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
-using System.Xml.Linq;
+using Newtonsoft.Json.Linq;
 
 namespace Team3
 {
+    // 이동시간 검사 결과 클래스
+    public class TravelCheckResult
+    {
+        public bool CanAdd { get; set; }
+        public DateTime? SuggestedStartTime { get; set; }
+        public string Message { get; set; }
+    }
+
     public class TravelService
     {
         private readonly string _kakaoApiKey = "5503db437c0473d403f26d8d3c463797";
         private readonly string _odsayApiKey = "89evtuid8IhBLTusRYsDWtVF1M/gDeUOmr2xounG+Ss";
 
-        private readonly Dictionary<string, Dictionary<string, int>> carTime =
-            new Dictionary<string, Dictionary<string, int>>()
+        // ─────────────────────────────────────────────
+        // Schedule.TransportType을 보고 대중교통 여부 판단
+        // ─────────────────────────────────────────────
+        private bool IsPublicTransport(Schedule schedule)
         {
-            { "원주", new Dictionary<string, int> { {"강남",100}, {"판교",90},  {"수원",110}, {"여주",30},  {"이천",50}  } },
-            { "강남", new Dictionary<string, int> { {"원주",100}, {"판교",25},  {"수원",50},  {"여주",80},  {"이천",70}  } },
-            { "판교", new Dictionary<string, int> { {"원주",90},  {"강남",25},  {"수원",30},  {"여주",60},  {"이천",50}  } },
-            { "수원", new Dictionary<string, int> { {"원주",110}, {"강남",50},  {"판교",30},  {"여주",70},  {"이천",60}  } },
-            { "여주", new Dictionary<string, int> { {"원주",30},  {"강남",80},  {"판교",60},  {"수원",70},  {"이천",20}  } },
-            { "이천", new Dictionary<string, int> {    {"원주",50},  {"강남",70},  {"판교",50},  {"수원",60},  {"여주",20}  } },
-        };
+            string transport = schedule.TransportType ?? "";
+            return transport.Contains("대중교통") ||
+                   transport.Contains("버스") ||
+                   transport.Contains("지하철") ||
+                   transport.Contains("Public") ||
+                   transport.Contains("public");
+        }
 
-        private readonly Dictionary<string, Dictionary<string, int>> publicTime =
-            new Dictionary<string, Dictionary<string, int>>()
-        {
-            { "원주", new Dictionary<string, int> { {"강남",90},  {"판교",100}, {"수원",120}, {"여주",40},  {"이천",70}  } },
-            { "강남", new Dictionary<string, int> { {"원주",90},  {"판교",30},  {"수원",60},  {"여주",90},  {"이천",90}  } },
-            { "판교", new Dictionary<string, int> { {"원주",100}, {"강남",30},  {"수원",50},  {"여주",80},  {"이천",80}  } },
-            { "수원", new Dictionary<string, int> { {"원주",120}, {"강남",60},  {"판교",50},  {"여주",100}, {"이천",90}  } },
-            { "여주", new Dictionary<string, int> { {"원주",40},  {"강남",90},  {"판교",80},  {"수원",100}, {"이천",20}  } },
-            { "이천", new Dictionary<string, int> { {"원주",70},  {"강남",90},  {"판교",80},  {"수원",90},  {"여주",20}  } },
-        };
-
+        // ─────────────────────────────────────────────
         // 장소명 → 좌표 변환 (카카오 로컬 API)
+        // ─────────────────────────────────────────────
         private (double lat, double lng)? GetCoordinates(string placeName)
         {
             try
@@ -46,7 +45,7 @@ namespace Team3
                     client.DefaultRequestHeaders.Add("Authorization", "KakaoAK " + _kakaoApiKey);
                     var response = client.GetStringAsync(url).Result;
                     var json = JObject.Parse(response);
-                    var documents = json["documents"] as Newtonsoft.Json.Linq.JArray;
+                    var documents = json["documents"] as JArray;
                     if (documents == null || documents.Count == 0) return null;
                     double lng = (double)documents[0]["x"];
                     double lat = double.Parse(documents[0]["y"].ToString());
@@ -56,15 +55,17 @@ namespace Team3
             catch { return null; }
         }
 
-        // 자동차 이동시간 (카카오 모빌리티 API → 실패시 테이블 fallback)
+        // ─────────────────────────────────────────────
+        // 자동차 이동시간 (카카오 모빌리티 API)
+        // 실패시 -1 반환
+        // ─────────────────────────────────────────────
         private int GetCarTravelTimeFromApi(string from, string to)
         {
             try
             {
                 var origin = GetCoordinates(from);
-                var dest = GetCoordinates(to);
-                if (origin == null || dest == null)
-                    return GetTableTime(from, to, false);
+                var dest   = GetCoordinates(to);
+                if (origin == null || dest == null) return -1;
 
                 string url = "https://apis-navi.kakaomobility.com/v1/directions" +
                              "?origin=" + origin.Value.lng + "," + origin.Value.lat +
@@ -79,18 +80,20 @@ namespace Team3
                     return seconds / 60;
                 }
             }
-            catch { return GetTableTime(from, to, false); }
+            catch { return -1; }
         }
 
-        // 대중교통 이동시간 (ODsay API → 실패시 테이블 fallback)
+        // ─────────────────────────────────────────────
+        // 대중교통 이동시간 (ODsay API)
+        // 실패시 -1 반환
+        // ─────────────────────────────────────────────
         private int GetPublicTravelTimeFromApi(string from, string to)
         {
             try
             {
                 var origin = GetCoordinates(from);
-                var dest = GetCoordinates(to);
-                if (origin == null || dest == null)
-                    return GetTableTime(from, to, true);
+                var dest   = GetCoordinates(to);
+                if (origin == null || dest == null) return -1;
 
                 string url = "https://api.odsay.com/v1/api/searchPubTransPathT" +
                              "?SX=" + origin.Value.lng +
@@ -103,53 +106,36 @@ namespace Team3
                 {
                     var response = client.GetStringAsync(url).Result;
                     var json = JObject.Parse(response);
-                    if (json["result"] != null && json["result"]["path"] != null && json["result"]["path"].HasValues)
+                    if (json["result"] != null &&
+                        json["result"]["path"] != null &&
+                        json["result"]["path"].HasValues)
                     {
                         int totalTime = (int)json["result"]["path"][0]["info"]["totalTime"];
                         if (totalTime > 0) return totalTime;
                     }
-                    return GetTableTime(from, to, true);
+                    return -1;
                 }
             }
-            catch { return GetTableTime(from, to, true); }
+            catch { return -1; }
         }
 
-        // 테이블 기반 이동시간 조회
-        // isPublic: true → 대중교통 테이블, false → 자차 테이블
-        private int GetTableTime(string from, string to, bool isPublic)
-        {
-            if (from == to) return 0;
-
-            string cleanFrom = from;
-            string cleanTo = to;
-            string[] registeredKeys = { "원주", "강남", "판교", "수원", "여주", "이천" };
-            foreach (var key in registeredKeys)
-            {
-                if (from.Contains(key)) cleanFrom = key;
-                if (to.Contains(key)) cleanTo = key;
-            }
-
-            var table = isPublic ? publicTime : carTime;
-
-            if (table.ContainsKey(cleanFrom) && table[cleanFrom].ContainsKey(cleanTo))
-                return table[cleanFrom][cleanTo];
-
-            return isPublic ? 120 : 60;
-        }
-
+        // ─────────────────────────────────────────────
         // 이동시간 조회 (외부 호출용)
-        // isPublic: true → 대중교통(ODsay), false → 자차(카카오)
+        // 실패시 -1 반환
+        // ─────────────────────────────────────────────
         public int GetTravelTime(string from, string to, bool isPublic)
         {
             if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to))
-                return isPublic ? 120 : 60;
+                return -1;
             if (from == to) return 0;
             if (!isPublic)
                 return GetCarTravelTimeFromApi(from, to);
             return GetPublicTravelTimeFromApi(from, to);
         }
 
+        // ─────────────────────────────────────────────
         // 시간 겹침 검사
+        // ─────────────────────────────────────────────
         public bool IsOverlap(Schedule newSched, List<Schedule> existing)
         {
             foreach (var old in existing)
@@ -161,53 +147,141 @@ namespace Team3
             return false;
         }
 
-        // 일정 추가 가능 여부 판단
-        // isPublic: true → 대중교통, false → 자차
-        public bool CanInsert(Schedule newSched, List<Schedule> existing, bool isPublic)
+        // ─────────────────────────────────────────────
+        // 이동시간까지 고려한 일정 추가 가능 여부 검사
+        // ─────────────────────────────────────────────
+        public TravelCheckResult CheckTravelTime(Schedule newSched, List<Schedule> existing)
         {
-            if (IsOverlap(newSched, existing)) return false;
+            bool isPublic = IsPublicTransport(newSched);
+            TimeSpan duration = newSched.EndDateTime - newSched.StartDateTime;
+            DateTime originalStart = newSched.StartDateTime;
 
-            var sorted = existing.OrderBy(s => s.StartDateTime).ToList();
-            var prev = sorted.LastOrDefault(s => s.EndDateTime <= newSched.StartDateTime);
-            var next = sorted.FirstOrDefault(s => s.StartDateTime >= newSched.EndDateTime);
+            List<Schedule> sorted = existing.OrderBy(s => s.StartDateTime).ToList();
 
-            if (prev != null && !string.IsNullOrWhiteSpace(prev.Location))
+            Schedule prev = sorted
+                .Where(s => s.EndDateTime <= newSched.StartDateTime)
+                .OrderByDescending(s => s.EndDateTime)
+                .FirstOrDefault();
+
+            Schedule next = sorted
+                .Where(s => s.StartDateTime >= newSched.StartDateTime)
+                .OrderBy(s => s.StartDateTime)
+                .FirstOrDefault();
+
+            DateTime earliestStart = newSched.StartDateTime;
+            DateTime? latestStart = null;
+
+            // 1. 이전 일정 → 새 일정 이동시간 검사
+            if (prev != null &&
+                !string.IsNullOrWhiteSpace(prev.Location) &&
+                !string.IsNullOrWhiteSpace(newSched.Location))
             {
-                if (!string.IsNullOrEmpty(newSched.Location))
+                int travelFromPrev = GetTravelTime(prev.Location, newSched.Location, isPublic);
+                if (travelFromPrev < 0)
                 {
-                    int travel = GetTravelTime(prev.Location, newSched.Location, isPublic);
-                    if (prev.EndDateTime.AddMinutes(travel) > newSched.StartDateTime)
-                        return false;
+                    return new TravelCheckResult
+                    {
+                        CanAdd = false,
+                        SuggestedStartTime = null,
+                        Message = "이전 일정에서 새 일정까지 이동시간 계산에 실패했습니다."
+                    };
                 }
+                DateTime possibleStart = prev.EndDateTime.AddMinutes(travelFromPrev);
+                if (possibleStart > earliestStart)
+                    earliestStart = possibleStart;
             }
 
-            if (next != null && !string.IsNullOrWhiteSpace(next.Location))
+            // 2. 새 일정 → 다음 일정 이동시간 검사
+            if (next != null &&
+                !string.IsNullOrWhiteSpace(newSched.Location) &&
+                !string.IsNullOrWhiteSpace(next.Location))
             {
-                if (!string.IsNullOrEmpty(newSched.Location))
+                int travelToNext = GetTravelTime(newSched.Location, next.Location, isPublic);
+                if (travelToNext < 0)
                 {
-                    int travel = GetTravelTime(newSched.Location, next.Location, isPublic);
-                    if (newSched.EndDateTime.AddMinutes(travel) > next.StartDateTime)
-                        return false;
+                    return new TravelCheckResult
+                    {
+                        CanAdd = false,
+                        SuggestedStartTime = null,
+                        Message = "새 일정에서 다음 일정까지 이동시간 계산에 실패했습니다."
+                    };
                 }
+                DateTime latestEnd = next.StartDateTime.AddMinutes(-travelToNext);
+                latestStart = latestEnd.Subtract(duration);
             }
 
-            return true;
+            // 3. 앞/뒤 조건 동시 만족 불가 → 물리적으로 불가능
+            if (latestStart.HasValue && earliestStart > latestStart.Value)
+            {
+                return new TravelCheckResult
+                {
+                    CanAdd = false,
+                    SuggestedStartTime = null,
+                    Message = "앞 일정과 뒤 일정 사이 이동시간을 모두 만족할 수 없어 물리적으로 불가능한 일정입니다."
+                };
+            }
+
+            // 4. 앞 일정 때문에 늦춰야 하는 경우
+            if (earliestStart > originalStart)
+            {
+                return new TravelCheckResult
+                {
+                    CanAdd = false,
+                    SuggestedStartTime = earliestStart,
+                    Message = string.Format(
+                        "이전 일정 장소에서 이동하려면 {0} 이후로 시작해야 합니다.",
+                        earliestStart.ToString("HH:mm"))
+                };
+            }
+
+            // 5. 뒤 일정 때문에 당겨야 하는 경우
+            if (latestStart.HasValue && originalStart > latestStart.Value)
+            {
+                return new TravelCheckResult
+                {
+                    CanAdd = false,
+                    SuggestedStartTime = latestStart.Value,
+                    Message = string.Format(
+                        "다음 일정 장소까지 이동하려면 {0} 이전에 시작해야 합니다.",
+                        latestStart.Value.ToString("HH:mm"))
+                };
+            }
+
+            // 6. 이동 가능
+            return new TravelCheckResult
+            {
+                CanAdd = true,
+                SuggestedStartTime = null,
+                Message = "이동 가능한 일정입니다."
+            };
         }
 
-        // 대체 시간 추천
-        public DateTime? SuggestEarliestStart(Schedule newSched, List<Schedule> existing, bool isPublic)
+        // ScheduleManager에서 사용하는 단순 true/false 함수
+        public bool CanInsert(Schedule newSched, List<Schedule> existing)
         {
-            var prev = existing
-                .Where(s => s.EndDateTime <= newSched.StartDateTime)
-                .OrderBy(s => s.EndDateTime)
-                .LastOrDefault();
+            if (IsOverlap(newSched, existing)) return false;
+            return CheckTravelTime(newSched, existing).CanAdd;
+        }
 
-            if (prev != null && !string.IsNullOrWhiteSpace(prev.Location))
+        // UI에서 메시지까지 받고 싶을 때 사용하는 함수
+        public TravelCheckResult GetTravelCheckResult(Schedule newSched, List<Schedule> existing)
+        {
+            if (IsOverlap(newSched, existing))
             {
-                int travel = GetTravelTime(prev.Location, newSched.Location, isPublic);
-                return prev.EndDateTime.AddMinutes(travel);
+                return new TravelCheckResult
+                {
+                    CanAdd = false,
+                    SuggestedStartTime = null,
+                    Message = "시간이 겹치는 일정이 있습니다."
+                };
             }
-            return null;
+            return CheckTravelTime(newSched, existing);
+        }
+
+        // 추천 시작 시간만 필요한 경우 사용
+        public DateTime? SuggestEarliestStart(Schedule newSched, List<Schedule> existing)
+        {
+            return CheckTravelTime(newSched, existing).SuggestedStartTime;
         }
     }
 }
